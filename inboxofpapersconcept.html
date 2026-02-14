@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Academic Inbox</title>
+    <script>
+      window.MathJax = {
+        tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$', '$$'], ['\\[', '\\]']], processEscapes: true }
+      };
+    </script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    
+    <style>
+        :root {
+            --bg-sidebar: #f6f8fc;
+            --bg-inbox: #ffffff;
+            --accent: #1a73e8;
+            --highlight-bg: #e8f0fe;
+            --text-main: #202124;
+            --text-sub: #5f6368;
+        }
+
+        body, html { height: 100%; margin: 0; font-family: 'Segoe UI', Roboto, sans-serif; overflow: hidden; }
+        .app-container { display: flex; height: 100vh; width: 100vw; }
+
+        /* Sidebar */
+        .sidebar { width: 260px; background: var(--bg-sidebar); display: flex; flex-direction: column; padding: 20px 0; border-right: 1px solid #e0e0e0; flex-shrink: 0; }
+        .sidebar-header { padding: 0 24px 20px; font-size: 1.2rem; font-weight: 600; color: var(--accent); }
+        #tabs-container { flex-grow: 1; overflow-y: auto; }
+        
+        .tab { padding: 10px 24px; cursor: pointer; border-radius: 0 20px 20px 0; margin-right: 10px; color: var(--text-sub); font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .tab:hover { background: #eef1f7; }
+        .tab.active { background: #d3e3fd; color: #041e49; font-weight: bold; }
+
+        /* Inbox */
+        .inbox { width: 400px; border-right: 1px solid #e0e0e0; overflow-y: auto; background: var(--bg-inbox); flex-shrink: 0; }
+        .email-item { padding: 15px 20px; border-bottom: 1px solid #f1f1f1; cursor: pointer; position: relative; }
+        .email-item:hover { background: #f8f9fa; box-shadow: inset 3px 0 0 var(--accent); }
+        .email-item.active { background: var(--highlight-bg); border-left: 4px solid var(--accent); }
+        
+        /* Main Paper Styling */
+        .email-item.main-paper { background-color: #fffdef; border-left: 4px solid #f4b400; }
+        .main-badge { position: absolute; bottom: 8px; right: 12px; font-size: 0.65rem; font-weight: bold; color: #f4b400; border: 1px solid #f4b400; padding: 1px 4px; border-radius: 3px; background: white; }
+
+        .email-author { font-weight: bold; font-size: 0.9rem; margin-bottom: 2px; }
+        .email-title { font-size: 0.85rem; color: var(--text-main); margin-bottom: 4px; }
+        .email-date { float: right; font-size: 0.75rem; color: var(--text-sub); }
+
+        /* PDF Icon */
+        .pdf-link { float: right; margin-left: 10px; text-decoration: none; font-size: 1.2rem; cursor: pointer; line-height: 1; z-index: 10; transition: transform 0.1s ease; }
+        .pdf-link:hover { transform: scale(1.2); }
+
+        /* Reading Pane */
+        .reading-pane { flex: 1; padding: 40px; overflow-y: auto; background: #fff; }
+        .abstract-title { font-size: 1.6rem; margin: 0 0 10px 0; }
+        .abstract-meta { color: var(--text-sub); font-size: 0.9rem; margin-bottom: 20px; border-bottom: 1px solid #eee; padding-bottom: 20px; }
+        .abstract-body { line-height: 1.6; color: #3c4043; font-size: 1.05rem; }
+        .arxiv-btn { display: inline-block; margin-top: 25px; padding: 10px 20px; background: var(--accent); color: white; text-decoration: none; border-radius: 4px; font-weight: 500; }
+
+        /* Controls */
+        .refresh-button { margin: 10px 20px; padding: 8px; background: transparent; border: 1px solid var(--accent); color: var(--accent); border-radius: 4px; cursor: pointer; font-size: 0.85rem; width: calc(100% - 40px); }
+        .refresh-button:hover { background: var(--highlight-bg); }
+        #timestamp { padding: 20px; font-size: 0.7rem; color: #999; text-align: center; }
+    </style>
+</head>
+<body>
+
+<div class="app-container">
+    <div class="sidebar">
+    <div class="sidebar-header">ArXiv Inbox</div>
+    <div id="tabs-container"></div>
+    
+    <button id="refresh-btn" class="refresh-button" onclick="triggerUpdate()">
+        ⟳ Check for Updates
+    </button>
+    
+    <div id="timestamp" class="timestamp-display"></div>
+</div>
+
+    <div class="inbox" id="inbox-list"></div>
+
+    <div class="reading-pane" id="reading-pane">
+        <div style="color: #999; text-align: center; margin-top: 100px;">Select a citation to view the abstract.</div>
+    </div>
+</div>
+
+<script src="citations_data.js"></script>
+
+<script>
+    let myPapers = [];
+    let currentPaperId = null;
+
+    function init() {
+        if (typeof citations === 'undefined' || typeof myPaperDetails === 'undefined') {
+            document.getElementById('tabs-container').innerHTML = '<div style="padding:20px; color:red;">Data not loaded.<br>Run python script first.</div>';
+            return;
+        }
+
+        // Build tabs dynamically from Python data
+        myPapers = Object.keys(myPaperDetails).map(key => ({ id: key, title: myPaperDetails[key].title || "Untitled" }));
+        
+        if (myPapers.length > 0) {
+            currentPaperId = myPapers[0].id;
+            renderTabs();
+            renderInbox(currentPaperId);
+        }
+
+        if (typeof lastUpdated !== 'undefined') document.getElementById('timestamp').innerText = "Last synced: " + lastUpdated;
+        
+    }
+
+    function renderTabs() {
+        const container = document.getElementById('tabs-container');
+        container.innerHTML = '';
+        myPapers.forEach(paper => {
+            const div = document.createElement('div');
+            div.className = `tab ${paper.id === currentPaperId ? 'active' : ''}`;
+            div.innerText = paper.title;
+            div.onclick = () => {
+                currentPaperId = paper.id;
+                renderTabs();
+                renderInbox(paper.id);
+            };
+            container.appendChild(div);
+        });
+    }
+
+    function renderInbox(paperId) {
+        const list = document.getElementById('inbox-list');
+        list.innerHTML = '';
+
+        // 1. Render Main Paper
+        const myDetails = myPaperDetails[paperId];
+        if (myDetails) {
+            const mainItem = createEmailItem(myDetails, true);
+            list.appendChild(mainItem);
+        }
+
+        // 2. Render Citations
+        const filtered = citations.filter(c => c.paperId === paperId);
+        if (filtered.length === 0) {
+            list.innerHTML += '<div style="padding:20px; color:#999;">No citations found.</div>';
+        } else {
+            filtered.forEach(cite => {
+                list.appendChild(createEmailItem(cite, false));
+            });
+        }
+        
+        if (window.MathJax) MathJax.typesetPromise();
+    }
+
+    function createEmailItem(data, isMain) {
+        const item = document.createElement('div');
+        item.className = `email-item ${isMain ? 'main-paper' : ''}`;
+        
+        // Note: We use data.year for main paper, data.date for citations (normalized by Python)
+        const dateDisplay = isMain ? data.year : data.date;
+
+        item.innerHTML = `
+            <span class="email-date">${dateDisplay}</span>
+            <a href="${data.link}" target="_blank" class="pdf-link" title="Open PDF">📄</a>
+            <div class="email-author">${data.author}</div>
+            <div class="email-title">${data.title}</div>
+            ${isMain ? '<span class="main-badge">[MAIN]</span>' : ''}
+        `;
+
+        item.querySelector('.pdf-link').onclick = (e) => e.stopPropagation();
+        item.onclick = () => {
+            document.querySelectorAll('.email-item').forEach(el => el.classList.remove('active'));
+            item.classList.add('active');
+            showAbstract(data);
+        };
+        return item;
+    }
+
+    function showAbstract(data) {
+        const pane = document.getElementById('reading-pane');
+        pane.innerHTML = `
+            <h1 class="abstract-title">${data.title}</h1>
+            <div class="abstract-meta"><strong>From:</strong> ${data.author} | <strong>Link:</strong> <a href="${data.link}" target="_blank">Open Paper</a></div>
+            <div class="abstract-body"><p>${data.abstract}</p></div>
+        `;
+        if (window.MathJax) MathJax.typesetPromise([pane]);
+    }
+
+    async function triggerUpdate() {
+        const btn = document.getElementById('refresh-btn');
+        btn.innerText = "⏳ Updating...";
+        btn.disabled = true;
+        try {
+            const response = await fetch('http://localhost:5000/refresh-data', { method: 'POST' });
+            const result = await response.json();
+            if (result.status === 'success') location.reload();
+            else alert("Error: " + result.message);
+        } catch (error) {
+            alert("Failed to connect to server. Is server.py running?");
+        } finally {
+            btn.innerText = "⟳ Check for Updates";
+            btn.disabled = false;
+        }
+    }
+
+    init();
+</script>
+
+</body>
+</html>
